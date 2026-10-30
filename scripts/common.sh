@@ -34,10 +34,12 @@ node_major() { node -p 'process.versions.node.split(".")[0]'; }
 
 render_template() {
   # render_template <template> <output>
-  sed -e "s|__ACCOUNT_ID__|$ACCOUNT_ID|g" \
+    sed -e "s|__ACCOUNT_ID__|$ACCOUNT_ID|g" \
       -e "s|__REGION__|$AWS_REGION|g" \
       -e "s|__GITHUB_ORG__|$GITHUB_ORG|g" \
       -e "s|__GITHUB_REPO__|$GITHUB_REPO|g" \
+      -e "s|__GITHUB_OWNER_ID__|${GITHUB_OWNER_ID:?set GITHUB_OWNER_ID in config.env}|g" \
+      -e "s|__GITHUB_REPO_ID__|${GITHUB_REPO_ID:?set GITHUB_REPO_ID in config.env}|g" \
       -e "s|__BRANCH__|$BRANCH|g" \
       "$1" > "$2"
 }
