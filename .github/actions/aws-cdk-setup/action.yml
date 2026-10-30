@@ -1,0 +1,55 @@
+name: Setup AWS CDK
+description: >
+  Reusable setup: installs Node.js and npm dependencies, then authenticates
+  to AWS with GitHub OIDC (no long-lived keys). Callers must run
+  actions/checkout before using this action.
+
+inputs:
+  role-to-assume:
+    description: ARN of the IAM role GitHub Actions assumes
+    required: true
+  aws-region:
+    description: AWS region
+    required: true
+  node-version:
+    description: Node.js version
+    required: false
+    default: '22'
+  session-name:
+    description: STS role session name (shows up in CloudTrail)
+    required: false
+    default: gh-cdk
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v5
+      with:
+        node-version: ${{ inputs.node-version }}
+        # Only enable npm caching when a lock file is committed
+        cache: ${{ hashFiles('package-lock.json') != '' && 'npm' || '' }}
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        if [ -f package-lock.json ]; then
+          npm ci
+        else
+          echo "::warning::package-lock.json not found. Falling back to 'npm install'. Commit a lock file for reproducible builds."
+          npm install
+        fi
+
+    - name: Show tool versions
+      shell: bash
+      run: |
+        node --version
+        npx cdk --version
+        aws --version
+
+    - name: Configure AWS credentials (OIDC)
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ inputs.role-to-assume }}
+        aws-region: ${{ inputs.aws-region }}
+        role-session-name: ${{ inputs.session-name }}

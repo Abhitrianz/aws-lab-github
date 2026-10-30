@@ -1,0 +1,17 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AssumeCdkBootstrapRoles",
+      "Effect": "Allow",
+      "Action": "sts:AssumeRole",
+      "Resource": "arn:aws:iam::__ACCOUNT_ID__:role/cdk-hnb659fds-*"
+    },
+    {
+      "Sid": "ReadDeploymentMarker",
+      "Effect": "Allow",
+      "Action": "ssm:GetParameter",
+      "Resource": "arn:aws:ssm:__REGION__:__ACCOUNT_ID__:parameter/gh-cdk-connectivity/*"
+    }
+  ]
+}

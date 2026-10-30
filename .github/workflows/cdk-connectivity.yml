@@ -1,0 +1,151 @@
+name: CDK Connectivity Test
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Highest stage to run
+        type: choice
+        options: [identity, synth, deploy]
+        default: identity
+
+permissions:
+  id-token: write   # Required for OIDC
+  contents: read
+
+concurrency:
+  group: cdk-connectivity-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CDK_ENV: dev
+  APP_NAME: gh-cdk-connectivity
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Stage 1: prove GitHub can authenticate to AWS (no Node, no CDK needed)
+  # ---------------------------------------------------------------------------
+  identity:
+    name: "Stage 1: AWS identity check"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check required repository variables
+        env:
+          ROLE: ${{ vars.AWS_ROLE_ARN }}
+          REGION: ${{ vars.AWS_REGION }}
+          ACCOUNT: ${{ vars.AWS_ACCOUNT_ID }}
+        run: |
+          missing=0
+          [ -z "$ROLE" ]    && echo "::error::Repository variable AWS_ROLE_ARN is not set"   && missing=1
+          [ -z "$REGION" ]  && echo "::error::Repository variable AWS_REGION is not set"     && missing=1
+          [ -z "$ACCOUNT" ] && echo "::error::Repository variable AWS_ACCOUNT_ID is not set" && missing=1
+          exit $missing
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: gh-identity-${{ github.run_id }}
+
+      - name: Verify identity matches expected account
+        env:
+          EXPECTED_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+        run: |
+          aws sts get-caller-identity
+
+          ACTUAL_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ACTUAL_ARN=$(aws sts get-caller-identity --query Arn --output text)
+
+          if [ "$ACTUAL_ACCOUNT_ID" != "$EXPECTED_ACCOUNT_ID" ]; then
+            echo "::error::Account mismatch. Expected $EXPECTED_ACCOUNT_ID, got $ACTUAL_ACCOUNT_ID"
+            exit 1
+          fi
+
+          echo "::notice::GitHub Actions is connected to AWS account $ACTUAL_ACCOUNT_ID as $ACTUAL_ARN"
+          {
+            echo "### Stage 1: AWS identity check passed"
+            echo "- Account: \`$ACTUAL_ACCOUNT_ID\`"
+            echo "- Caller: \`$ACTUAL_ARN\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # Stage 2: typecheck, unit test and synthesize the CloudFormation template
+  # ---------------------------------------------------------------------------
+  synth:
+    name: "Stage 2: CDK synth"
+    needs: identity
+    if: ${{ github.event_name == 'push' || inputs.stage != 'identity' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup and authenticate
+        uses: ./.github/actions/aws-cdk-setup
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          session-name: gh-synth-${{ github.run_id }}
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Synthesize CloudFormation template
+        run: npx cdk synth -c env=$CDK_ENV --quiet
+
+      - name: Upload cdk.out
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdk-out
+          path: cdk.out
+          retention-days: 3
+
+  # ---------------------------------------------------------------------------
+  # Stage 3: deploy and verify the deployment marker exists in AWS
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: "Stage 3: CDK deploy"
+    needs: synth
+    if: ${{ github.event_name == 'push' || inputs.stage == 'deploy' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup and authenticate
+        uses: ./.github/actions/aws-cdk-setup
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          session-name: gh-deploy-${{ github.run_id }}
+
+      - name: Deploy stack
+        run: |
+          npx cdk deploy --all -c env=$CDK_ENV \
+            --require-approval never \
+            --outputs-file cdk-outputs.json
+          cat cdk-outputs.json
+
+      - name: Verify deployment marker in AWS
+        run: |
+          VALUE=$(aws ssm get-parameter \
+            --name "/$APP_NAME/$CDK_ENV/deployment-marker" \
+            --query 'Parameter.Value' --output text)
+          echo "$VALUE"
+
+          if ! echo "$VALUE" | grep -q "$GITHUB_SHA"; then
+            echo "::error::Deployment marker does not contain this commit ($GITHUB_SHA)"
+            exit 1
+          fi
+
+          echo "::notice::End-to-end GitHub -> AWS CDK deployment verified"
+          {
+            echo "### Stage 3: CDK deploy verified"
+            echo '```json'
+            echo "$VALUE"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
