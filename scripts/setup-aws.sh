@@ -37,20 +37,20 @@ render_template "$PROJECT_ROOT/iam/github-permissions-policy.template.json" "$PE
 
 if aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
   log "Role exists; updating trust policy"
-  aws iam update-assume-role-policy --role-name "$ROLE_NAME" --policy-document "file://$TRUST_FILE"
+  aws iam update-assume-role-policy --role-name "$ROLE_NAME" --policy-document "file://$(native_path "$TRUST_FILE")"
 else
   log "Creating role $ROLE_NAME"
   aws iam create-role \
     --role-name "$ROLE_NAME" \
     --description "Assumed by GitHub Actions ($GITHUB_ORG/$GITHUB_REPO) via OIDC" \
     --max-session-duration 3600 \
-    --assume-role-policy-document "file://$TRUST_FILE" >/dev/null
+    --assume-role-policy-document "file://$(native_path "$TRUST_FILE")" >/dev/null
 fi
 
 aws iam put-role-policy \
   --role-name "$ROLE_NAME" \
   --policy-name gh-cdk-deploy-policy \
-  --policy-document "file://$PERM_FILE"
+  --policy-document "file://$(native_path "$PERM_FILE")"
 ok "Role ready: $ROLE_ARN"
 
 # ---- 3. CDK bootstrap -------------------------------------------------------

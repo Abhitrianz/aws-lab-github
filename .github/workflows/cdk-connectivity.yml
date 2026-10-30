@@ -27,7 +27,7 @@ jobs:
   # ---------------------------------------------------------------------------
   # Stage 1: prove GitHub can authenticate to AWS (no Node, no CDK needed)
   # ---------------------------------------------------------------------------
-    identity:
+  identity:
     name: "Stage 1: AWS identity check"
     runs-on: ubuntu-latest
     steps:

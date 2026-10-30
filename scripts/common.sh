@@ -41,3 +41,9 @@ render_template() {
       -e "s|__BRANCH__|$BRANCH|g" \
       "$1" > "$2"
 }
+
+# Converts a Git Bash path (/c/Users/...) to a Windows path (C:/Users/...)
+# so Windows programs such as aws.exe can open it. No-op on Linux/macOS.
+native_path() {
+  if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else echo "$1"; fi
+}
